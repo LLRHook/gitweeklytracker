@@ -145,13 +145,16 @@ fi
 REPORT_FILE="weekly-report-${TODAY}.md"
 
 # ── Data collection ─────────────────────────────────────────
-# Parallel indexed arrays — index i corresponds to EMAILS[i]
-
+# Per-author totals — index i corresponds to EMAILS[i]
 A_COMMITS=()
 A_INSERTIONS=()
 A_DELETIONS=()
 A_FILES=()
-A_LOG=()        # log entries include repo name
+
+# Per-author-per-repo stats stored as newline-separated records:
+#   "repo_name|commits|insertions|deletions"
+# Only repos with >0 commits are included.
+A_REPO_STATS=()
 
 TOTAL_COMMITS=0
 TOTAL_INSERTIONS=0
@@ -169,8 +172,6 @@ day_index() {
 }
 
 ALL_CHANGED_FILES=""
-
-# Track which repos had activity
 ACTIVE_REPOS=""
 
 # Initialize per-author accumulators
@@ -179,7 +180,7 @@ for i in "${!EMAILS[@]}"; do
     A_INSERTIONS+=("0")
     A_DELETIONS+=("0")
     A_FILES+=("0")
-    A_LOG+=("")
+    A_REPO_STATS+=("")
 done
 
 # Iterate over every repo × every author
@@ -192,7 +193,6 @@ for repo in "${REPOS[@]}"; do
         insertions=0
         deletions=0
         files_changed=0
-        log_entries=""
 
         while IFS= read -r line; do
             [[ -z "$line" ]] && continue
@@ -201,7 +201,6 @@ for repo in "${REPOS[@]}"; do
                 line="${line#COMMIT:}"
                 IFS='|' read -r hash cdate subject <<< "$line"
                 commits=$((commits + 1))
-                log_entries="${log_entries}${hash:0:7}|${cdate}|${subject}|${repo_name}"$'\n'
 
                 commit_date_part="${cdate%% *}"
                 if [[ "$IS_MACOS" -eq 1 ]]; then
@@ -229,17 +228,19 @@ for repo in "${REPOS[@]}"; do
         done < <(git -C "$repo" log --author="$email" --since="$START_ISO" --until="$END_ISO" \
             --format="COMMIT:%H|%ai|%s" --shortstat 2>/dev/null || true)
 
+        # Accumulate per-author totals
         A_COMMITS[$i]=$(( ${A_COMMITS[$i]} + commits ))
         A_INSERTIONS[$i]=$(( ${A_INSERTIONS[$i]} + insertions ))
         A_DELETIONS[$i]=$(( ${A_DELETIONS[$i]} + deletions ))
         A_FILES[$i]=$(( ${A_FILES[$i]} + files_changed ))
-        A_LOG[$i]="${A_LOG[$i]}${log_entries}"
 
         TOTAL_COMMITS=$((TOTAL_COMMITS + commits))
         TOTAL_INSERTIONS=$((TOTAL_INSERTIONS + insertions))
         TOTAL_DELETIONS=$((TOTAL_DELETIONS + deletions))
 
+        # Store per-repo stats for this author (only if there were commits)
         if [[ $commits -gt 0 ]]; then
+            A_REPO_STATS[$i]="${A_REPO_STATS[$i]}${repo_name}|${commits}|${insertions}|${deletions}"$'\n'
             ACTIVE_REPOS="${ACTIVE_REPOS}${repo_name}"$'\n'
         fi
 
@@ -247,7 +248,6 @@ for repo in "${REPOS[@]}"; do
         changed="$(git -C "$repo" log --author="$email" --since="$START_ISO" --until="$END_ISO" \
             --name-only --format="" 2>/dev/null || true)"
         if [[ -n "$changed" ]]; then
-            # Prefix each file with repo name for clarity
             while IFS= read -r f; do
                 [[ -n "$f" ]] && ALL_CHANGED_FILES="${ALL_CHANGED_FILES}${repo_name}/${f}"$'\n'
             done <<< "$changed"
@@ -345,10 +345,22 @@ print_terminal() {
         echo "Author: ${EMAILS[$i]}"
         echo "─────────────────────────────"
         printf "  %-18s %s\n" "Commits:" "${A_COMMITS[$i]}"
-        printf "  %-18s %s\n" "Files Changed:" "${A_FILES[$i]}"
         printf "  %-18s +%s\n" "Insertions:" "${A_INSERTIONS[$i]}"
         printf "  %-18s -%s\n" "Deletions:" "${A_DELETIONS[$i]}"
         echo ""
+
+        # Per-repo breakdown (only repos with commits)
+        stats="${A_REPO_STATS[$i]}"
+        if [[ -n "$stats" ]]; then
+            printf "  %-25s %8s %10s %10s\n" "Repo" "Commits" "Ins" "Del"
+            printf "  %-25s %8s %10s %10s\n" "─────────────────────────" "────────" "──────────" "──────────"
+            while IFS= read -r row; do
+                [[ -z "$row" ]] && continue
+                IFS='|' read -r rname rc ri rd <<< "$row"
+                printf "  %-25s %8s %+10d %10s\n" "$rname" "$rc" "$ri" "-${rd}"
+            done <<< "$stats"
+            echo ""
+        fi
     done
 
     echo "── Summary ──────────────────"
@@ -406,14 +418,25 @@ generate_markdown() {
         echo "</details>"
         echo ""
 
-        echo "## Per-Author Breakdown"
-        echo ""
-        echo "| Author | Commits | Files Changed | Insertions | Deletions |"
-        echo "|--------|---------|---------------|------------|-----------|"
+        # Per-author breakdown with per-repo tables
         for i in "${!EMAILS[@]}"; do
-            echo "| ${EMAILS[$i]} | ${A_COMMITS[$i]} | ${A_FILES[$i]} | +${A_INSERTIONS[$i]} | -${A_DELETIONS[$i]} |"
+            echo "## ${EMAILS[$i]}"
+            echo ""
+            stats="${A_REPO_STATS[$i]}"
+            if [[ -n "$stats" ]]; then
+                echo "| Repo | Commits | Insertions | Deletions |"
+                echo "|------|---------|------------|-----------|"
+                while IFS= read -r row; do
+                    [[ -z "$row" ]] && continue
+                    IFS='|' read -r rname rc ri rd <<< "$row"
+                    echo "| ${rname} | ${rc} | +${ri} | -${rd} |"
+                done <<< "$stats"
+                echo "| **Subtotal** | **${A_COMMITS[$i]}** | **+${A_INSERTIONS[$i]}** | **-${A_DELETIONS[$i]}** |"
+            else
+                echo "*No activity this week.*"
+            fi
+            echo ""
         done
-        echo ""
 
         echo "## Summary"
         echo ""
@@ -451,24 +474,6 @@ generate_markdown() {
             echo "| ${DAY_NAMES[$di]} | ${DAY_COUNTS[$di]} |"
         done
         echo ""
-
-        echo "## Commit Log"
-        echo ""
-        for i in "${!EMAILS[@]}"; do
-            log="${A_LOG[$i]}"
-            if [[ -n "$log" ]]; then
-                echo "### ${EMAILS[$i]}"
-                echo ""
-                echo "| Hash | Date | Message | Repo |"
-                echo "|------|------|---------|------|"
-                while IFS= read -r entry; do
-                    [[ -z "$entry" ]] && continue
-                    IFS='|' read -r hash cdate subject repo_name <<< "$entry"
-                    echo "| \`${hash}\` | ${cdate} | ${subject} | ${repo_name} |"
-                done <<< "$log"
-                echo ""
-            fi
-        done
 
         echo "---"
         echo "*Generated on $(date -u '+%Y-%m-%d %H:%M UTC')*"
