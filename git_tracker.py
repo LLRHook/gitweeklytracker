@@ -50,6 +50,41 @@ def _run_git(repo_path: str, args: list[str], timeout: int = 10) -> str:
         return ""
 
 
+def _probe_known_subdirs(parent_path: str) -> list[str]:
+    """When os.listdir fails (macOS TCC), try known subdirectory names.
+
+    Uses Claude Code project data (~/.claude/projects/) to discover
+    subdirectory names that might be git repos under the blocked path.
+    """
+    repos: list[str] = []
+    claude_projects = os.path.expanduser("~/.claude/projects")
+    if not os.path.isdir(claude_projects):
+        return repos
+
+    # Encode the parent path the same way Claude encodes project dirs
+    encoded_prefix = parent_path.replace("/", "-").replace(" ", "-")
+
+    for dirname in os.listdir(claude_projects):
+        # e.g. -Users-victorivanov-Documents-group-projects-knock
+        decoded_prefix = "-" + encoded_prefix.lstrip("-")
+        if not dirname.startswith(decoded_prefix):
+            continue
+        # Extract the subdirectory name after our prefix
+        suffix = dirname[len(decoded_prefix):]
+        if not suffix.startswith("-"):
+            continue
+        subdir_name = suffix[1:]  # strip leading dash
+        if not subdir_name:
+            continue
+        candidate = os.path.join(parent_path, subdir_name)
+        # Verify it's actually a git repo (direct access works even if listing doesn't)
+        result = _run_git(candidate, ["rev-parse", "--is-inside-work-tree"])
+        if result.strip() == "true":
+            repos.append(os.path.abspath(candidate))
+
+    return repos
+
+
 def _discover_repos(
     emails: list[str],
     explicit_paths: list[str] | None = None,
@@ -67,14 +102,16 @@ def _discover_repos(
             if os.path.isdir(os.path.join(path, ".git")):
                 repos.append(os.path.abspath(path))
             else:
-                # Scan children
+                # Scan children for git repos
                 try:
                     for child in os.listdir(path):
                         child_path = os.path.join(path, child)
                         if os.path.isdir(os.path.join(child_path, ".git")):
                             repos.append(os.path.abspath(child_path))
                 except PermissionError:
-                    pass
+                    # macOS TCC may block directory listing but allow access
+                    # to individual subdirs. Try known paths from Claude data.
+                    repos.extend(_probe_known_subdirs(path))
     else:
         # Auto-discover under $HOME
         home = os.path.expanduser("~")
