@@ -3,6 +3,9 @@
 import json
 import glob
 import os
+import urllib.request
+import urllib.parse
+import urllib.error
 from dataclasses import dataclass, field
 from datetime import datetime, date, timedelta, timezone
 
@@ -375,7 +378,6 @@ def get_claude_analytics(
             continue
 
         session_id = os.path.splitext(os.path.basename(jsonl_path))[0]
-        session_id = os.path.splitext(os.path.basename(jsonl_path))[0]
         # For subagent files like agent-abc123.jsonl, use parent session dir
         if session_id.startswith("agent-"):
             parts = jsonl_path.split(os.sep)
@@ -595,6 +597,187 @@ def _empty_analytics(today: date, days: int) -> ClaudeAnalytics:
         busiest_hour=0,
         most_active_project="N/A",
     )
+
+
+# ── OAuth Usage Quota ──────────────────────────────────────
+
+USAGE_BAR_CONFIG_DIR = os.path.expanduser("~/.config/claude-usage-bar")
+OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+OAUTH_TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
+USAGE_API_URL = "https://api.anthropic.com/api/oauth/usage"
+USAGE_BETA_HEADER = "oauth-2025-04-20"
+
+
+@dataclass
+class UsageBucket:
+    utilization: float  # 0-100 percentage
+    resets_at: str  # ISO 8601 timestamp
+
+    @property
+    def reset_datetime(self) -> datetime | None:
+        if not self.resets_at:
+            return None
+        try:
+            return datetime.fromisoformat(self.resets_at.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    @property
+    def reset_description(self) -> str:
+        """Human-readable time until reset."""
+        dt = self.reset_datetime
+        if not dt:
+            return ""
+        delta = dt - datetime.now(timezone.utc)
+        if delta.total_seconds() <= 0:
+            return "now"
+        days = delta.days
+        hours = delta.seconds // 3600
+        minutes = (delta.seconds % 3600) // 60
+        if days > 0:
+            return f"{days}d {hours}h"
+        if hours > 0:
+            return f"{hours}h {minutes}m"
+        return f"{minutes}m"
+
+
+@dataclass
+class UsageQuota:
+    five_hour: UsageBucket | None = None
+    seven_day: UsageBucket | None = None
+    seven_day_opus: UsageBucket | None = None
+    seven_day_sonnet: UsageBucket | None = None
+    available: bool = False  # whether quota data was successfully fetched
+
+
+def _load_oauth_credentials() -> dict | None:
+    """Load OAuth credentials from claude-usage-bar config."""
+    creds_path = os.path.join(USAGE_BAR_CONFIG_DIR, "credentials.json")
+    if not os.path.exists(creds_path):
+        return None
+    try:
+        with open(creds_path, encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _save_oauth_credentials(creds: dict) -> None:
+    """Save updated OAuth credentials back to disk."""
+    creds_path = os.path.join(USAGE_BAR_CONFIG_DIR, "credentials.json")
+    try:
+        with open(creds_path, "w", encoding="utf-8") as f:
+            json.dump(creds, f, indent=2, sort_keys=True)
+    except OSError:
+        pass
+
+
+def _refresh_token_if_needed(creds: dict) -> dict | None:
+    """Refresh the OAuth token if expired. Returns updated creds or None."""
+    expires_at = creds.get("expiresAt", "")
+    if expires_at:
+        try:
+            exp = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+            if datetime.now(timezone.utc) < exp - timedelta(seconds=60):
+                return creds  # still valid
+        except ValueError:
+            pass
+
+    refresh_token = creds.get("refreshToken")
+    if not refresh_token:
+        return creds  # no refresh token, try access token as-is
+
+    body = urllib.parse.urlencode({
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+        "client_id": OAUTH_CLIENT_ID,
+    }).encode()
+
+    req = urllib.request.Request(OAUTH_TOKEN_URL, data=body, method="POST")
+    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+            creds["accessToken"] = data["access_token"]
+            if "refresh_token" in data:
+                creds["refreshToken"] = data["refresh_token"]
+            if "expires_in" in data:
+                exp = datetime.now(timezone.utc) + timedelta(seconds=data["expires_in"])
+                creds["expiresAt"] = exp.isoformat()
+            _save_oauth_credentials(creds)
+            return creds
+    except (urllib.error.URLError, OSError, KeyError, json.JSONDecodeError):
+        return creds  # refresh failed, try existing token
+
+
+def _parse_usage_bucket(data: dict | None) -> UsageBucket | None:
+    if not data or "utilization" not in data:
+        return None
+    return UsageBucket(
+        utilization=data.get("utilization", 0.0),
+        resets_at=data.get("resets_at", ""),
+    )
+
+
+def get_usage_quota() -> UsageQuota:
+    """Fetch real usage quota from Anthropic OAuth API.
+
+    Falls back to latest entry in history.json if API call fails.
+    """
+    creds = _load_oauth_credentials()
+    if not creds:
+        return UsageQuota()
+
+    creds = _refresh_token_if_needed(creds)
+    if not creds:
+        return UsageQuota()
+
+    token = creds.get("accessToken", "")
+    if not token:
+        return UsageQuota()
+
+    # Try live API
+    req = urllib.request.Request(USAGE_API_URL)
+    req.add_header("Authorization", f"Bearer {token}")
+    req.add_header("anthropic-beta", USAGE_BETA_HEADER)
+
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+            return UsageQuota(
+                five_hour=_parse_usage_bucket(data.get("five_hour")),
+                seven_day=_parse_usage_bucket(data.get("seven_day")),
+                seven_day_opus=_parse_usage_bucket(data.get("seven_day_opus")),
+                seven_day_sonnet=_parse_usage_bucket(data.get("seven_day_sonnet")),
+                available=True,
+            )
+    except (urllib.error.URLError, OSError, json.JSONDecodeError):
+        pass
+
+    # Fallback: read latest from history.json
+    history_path = os.path.join(USAGE_BAR_CONFIG_DIR, "history.json")
+    if os.path.exists(history_path):
+        try:
+            with open(history_path, encoding="utf-8") as f:
+                history = json.load(f)
+            if history:
+                latest = history[-1]
+                return UsageQuota(
+                    five_hour=UsageBucket(
+                        utilization=latest.get("pct5h", 0) * 100,
+                        resets_at="",
+                    ),
+                    seven_day=UsageBucket(
+                        utilization=latest.get("pct7d", 0) * 100,
+                        resets_at="",
+                    ),
+                    available=True,
+                )
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    return UsageQuota()
 
 
 if __name__ == "__main__":
