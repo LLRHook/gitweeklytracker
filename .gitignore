@@ -1,2 +1,5 @@
 .env
 weekly-report-*.md
+__pycache__/
+*.pyc
+.venv/
