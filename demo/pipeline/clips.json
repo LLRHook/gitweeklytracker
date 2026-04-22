@@ -1,0 +1,75 @@
+{
+  "project": "Git Weekly Report",
+  "label": "gitweeklytracker",
+  "output_name": "gitweeklytracker-demo",
+  "title": "Weekly git activity, without spreadsheets",
+  "subtitle": "Point it at repos and author emails. Get commits, churn, streaks, and a Markdown report.",
+  "end_title": "Run it anywhere Git runs",
+  "end_body": "One Bash script. Local repos only. Markdown output ready for a weekly update.",
+  "cta": "GIT_REPORT_EMAILS=you@example.com bash git-weekly-report.sh",
+  "preview_s": 12.0,
+  "capture": {
+    "method": "vhs",
+    "tools": ["vhs"]
+  },
+  "format": {
+    "fps": 30,
+    "crf": 18,
+    "transition_ms": 240,
+    "transition_card_s": 1.35,
+    "title_hold_s": 1.4,
+    "end_hold_s": 2.8
+  },
+  "clips": [
+    {
+      "id": "01-scope",
+      "label": "Scope",
+      "file": "clips/01-scope.mp4",
+      "caption_title": "Scope the scan explicitly",
+      "caption_body": "Use author emails and repo paths so the report never wanders into unrelated work.",
+      "start_s": 0,
+      "hold_s": 5.5,
+      "speed": 1.0
+    },
+    {
+      "id": "02-generate",
+      "label": "Generate",
+      "file": "clips/02-generate.mp4",
+      "caption_title": "Generate the weekly rollup",
+      "caption_body": "Terminal output groups activity by author, repo, insertions, deletions, and daily rhythm.",
+      "start_s": 0,
+      "hold_s": 7.0,
+      "speed": 1.0
+    },
+    {
+      "id": "03-markdown",
+      "label": "Markdown",
+      "file": "clips/03-markdown.mp4",
+      "caption_title": "A Markdown report lands beside the run",
+      "caption_body": "The same data becomes a shareable weekly-report file with repo tables and summaries.",
+      "start_s": 0,
+      "hold_s": 6.2,
+      "speed": 1.0
+    },
+    {
+      "id": "04-evidence",
+      "label": "Evidence",
+      "file": "clips/04-evidence.mp4",
+      "caption_title": "The useful details are already pulled out",
+      "caption_body": "Top changed files and day-by-day activity make the weekly narrative easy to write.",
+      "start_s": 0,
+      "hold_s": 5.8,
+      "speed": 1.0
+    }
+  ],
+  "palette": {
+    "bg": "#0b1020",
+    "surface": "#121a2f",
+    "text": "#f7fbff",
+    "muted": "#9fb3c8",
+    "grid": "#26395c",
+    "accent": "#37d39a",
+    "accent_2": "#4f8cff",
+    "accent_text": "#a9ffd7"
+  }
+}

@@ -2,6 +2,12 @@
 
 A single Bash script that generates a weekly git activity report across all your repositories, grouped by author email.
 
+## Demo
+
+[![Watch the Git Weekly Report demo](demo/pipeline/output/preview.png)](demo/pipeline/output/gitweeklytracker-demo.mp4)
+
+Watch the demo video: [gitweeklytracker-demo.mp4](demo/pipeline/output/gitweeklytracker-demo.mp4)
+
 ## How it works
 
 1. Set your git author email(s)
