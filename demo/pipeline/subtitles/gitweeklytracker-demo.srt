@@ -1,0 +1,31 @@
+1
+00:00:01,160 --> 00:00:02,510
+Scope the scan explicitly
+
+2
+00:00:02,270 --> 00:00:07,770
+Use author emails and repo paths so the report never wanders into unrelated work.
+
+3
+00:00:07,530 --> 00:00:08,880
+Generate the weekly rollup
+
+4
+00:00:08,640 --> 00:00:15,640
+Terminal output groups activity by author, repo, insertions, deletions, and daily rhythm.
+
+5
+00:00:15,400 --> 00:00:16,750
+A Markdown report lands beside the run
+
+6
+00:00:16,510 --> 00:00:22,710
+The same data becomes a shareable weekly-report file with repo tables and summaries.
+
+7
+00:00:22,470 --> 00:00:23,820
+The useful details are already pulled out
+
+8
+00:00:23,580 --> 00:00:29,380
+Top changed files and day-by-day activity make the weekly narrative easy to write.
