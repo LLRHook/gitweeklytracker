@@ -64,7 +64,9 @@ def _gauge(pct: float, width: int = 20) -> str:
     color = intensity_color(pct, 100)
     filled = int(pct / 100 * width)
     empty = width - filled
-    return f"[{color}]{'\u2588' * filled}[/][dim]{'\u2591' * empty}[/]"
+    filled_bar = "\u2588" * filled
+    empty_bar = "\u2591" * empty
+    return f"[{color}]{filled_bar}[/][dim]{empty_bar}[/]"
 
 
 def render_header(claude_data: ClaudeAnalytics, quota: UsageQuota) -> Panel:
