@@ -3,3 +3,7 @@ weekly-report-*.md
 __pycache__/
 *.pyc
 .venv/
+
+# Local agent context
+CLAUDE.md
+.claude/
