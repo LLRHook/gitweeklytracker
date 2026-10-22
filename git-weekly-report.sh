@@ -128,16 +128,16 @@ echo ""
 # Compute date range (UTC) — handle macOS vs Linux
 if date -v-7d +%s &>/dev/null; then
     END_DATE="$(date -u '+%Y-%m-%d %H:%M')"
-    END_ISO="$(date -u '+%Y-%m-%dT%H:%M:%S')"
+    END_ISO="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     START_DATE="$(date -u -v-7d '+%Y-%m-%d %H:%M')"
-    START_ISO="$(date -u -v-7d '+%Y-%m-%dT%H:%M:%S')"
+    START_ISO="$(date -u -v-7d '+%Y-%m-%dT%H:%M:%SZ')"
     TODAY="$(date -u '+%Y-%m-%d')"
     IS_MACOS=1
 else
     END_DATE="$(date -u '+%Y-%m-%d %H:%M')"
-    END_ISO="$(date -u '+%Y-%m-%dT%H:%M:%S')"
+    END_ISO="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     START_DATE="$(date -u -d '7 days ago' '+%Y-%m-%d %H:%M')"
-    START_ISO="$(date -u -d '7 days ago' '+%Y-%m-%dT%H:%M:%S')"
+    START_ISO="$(date -u -d '7 days ago' '+%Y-%m-%dT%H:%M:%SZ')"
     TODAY="$(date -u '+%Y-%m-%d')"
     IS_MACOS=0
 fi
@@ -204,9 +204,9 @@ for repo in "${REPOS[@]}"; do
 
                 commit_date_part="${cdate%% *}"
                 if [[ "$IS_MACOS" -eq 1 ]]; then
-                    dow="$(date -j -f '%Y-%m-%d' "$commit_date_part" '+%a' 2>/dev/null || echo "")"
+                    dow="$(LC_ALL=C date -u -j -f '%Y-%m-%d' "$commit_date_part" '+%a' 2>/dev/null || echo "")"
                 else
-                    dow="$(date -d "$commit_date_part" '+%a' 2>/dev/null || echo "")"
+                    dow="$(LC_ALL=C date -u -d "$commit_date_part" '+%a' 2>/dev/null || echo "")"
                 fi
                 if [[ -n "$dow" ]]; then
                     di="$(day_index "$dow")"
@@ -225,8 +225,8 @@ for repo in "${REPOS[@]}"; do
                     deletions=$((deletions + BASH_REMATCH[1]))
                 fi
             fi
-        done < <(git -C "$repo" log --author="$email" --since="$START_ISO" --until="$END_ISO" \
-            --format="COMMIT:%H|%ai|%s" --shortstat 2>/dev/null || true)
+        done < <(TZ=UTC git -C "$repo" log --author="$email" --since="$START_ISO" --until="$END_ISO" \
+            --date=format-local:%Y-%m-%d --format="COMMIT:%H|%ad|%s" --shortstat 2>/dev/null || true)
 
         # Accumulate per-author totals
         A_COMMITS[$i]=$(( ${A_COMMITS[$i]} + commits ))
@@ -273,8 +273,8 @@ fi
 ALL_COMMIT_DATES=""
 for repo in "${REPOS[@]}"; do
     for email in "${EMAILS[@]}"; do
-        dates="$(git -C "$repo" log --author="$email" --since="$START_ISO" --until="$END_ISO" \
-            --format="%ai" 2>/dev/null | awk '{print $1}' || true)"
+        dates="$(TZ=UTC git -C "$repo" log --author="$email" --since="$START_ISO" --until="$END_ISO" \
+            --date=format-local:%Y-%m-%d --format="%ad" 2>/dev/null || true)"
         [[ -n "$dates" ]] && ALL_COMMIT_DATES="${ALL_COMMIT_DATES}${dates}"$'\n'
     done
 done
@@ -289,11 +289,11 @@ if [[ -n "$ALL_COMMIT_DATES" ]]; then
         [[ -z "$d" ]] && continue
         if [[ -n "$prev" ]]; then
             if [[ "$IS_MACOS" -eq 1 ]]; then
-                prev_epoch="$(date -j -f '%Y-%m-%d' "$prev" '+%s' 2>/dev/null || echo 0)"
-                curr_epoch="$(date -j -f '%Y-%m-%d' "$d" '+%s' 2>/dev/null || echo 0)"
+                prev_epoch="$(date -u -j -f '%Y-%m-%d %H:%M:%S' "$prev 00:00:00" '+%s' 2>/dev/null || echo 0)"
+                curr_epoch="$(date -u -j -f '%Y-%m-%d %H:%M:%S' "$d 00:00:00" '+%s' 2>/dev/null || echo 0)"
             else
-                prev_epoch="$(date -d "$prev" '+%s' 2>/dev/null || echo 0)"
-                curr_epoch="$(date -d "$d" '+%s' 2>/dev/null || echo 0)"
+                prev_epoch="$(date -u -d "$prev 00:00:00" '+%s' 2>/dev/null || echo 0)"
+                curr_epoch="$(date -u -d "$d 00:00:00" '+%s' 2>/dev/null || echo 0)"
             fi
             diff_days=$(( (curr_epoch - prev_epoch) / 86400 ))
             if [[ $diff_days -eq 1 ]]; then

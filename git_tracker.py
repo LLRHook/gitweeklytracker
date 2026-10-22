@@ -185,7 +185,7 @@ def _collect_repo_email_data(
     output = _run_git(repo_path, [
         "log", f"--author={email}",
         f"--since={since_iso}", f"--until={until_iso}",
-        "--format=COMMIT:%H|%ai|%s", "--shortstat",
+        "--format=COMMIT:%H|%aI|%s", "--shortstat",
     ])
 
     for line in output.splitlines():
@@ -197,10 +197,9 @@ def _collect_repo_email_data(
             # Extract date for daily activity and streak
             parts = line.split("|")
             if len(parts) >= 2:
-                date_part = parts[1].split()[0]
                 try:
                     commit_dates.append(
-                        datetime.strptime(date_part, "%Y-%m-%d").date()
+                        datetime.fromisoformat(parts[1]).astimezone(timezone.utc).date()
                     )
                 except ValueError:
                     pass
@@ -264,8 +263,8 @@ def get_git_analytics(
 
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=days)
-    since_iso = start.strftime("%Y-%m-%dT%H:%M:%S")
-    until_iso = now.strftime("%Y-%m-%dT%H:%M:%S")
+    since_iso = start.strftime("%Y-%m-%dT%H:%M:%SZ")
+    until_iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     start_display = start.strftime("%Y-%m-%d %H:%M")
     end_display = now.strftime("%Y-%m-%d %H:%M")
 

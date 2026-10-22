@@ -59,8 +59,33 @@ Each path can be a git repo directly, or a parent directory whose immediate chil
 - **Top 10 most-changed files** across all authors and repos
 - **Daily activity** bar chart (terminal) / table (markdown)
 
+Reports cover a rolling seven-day interval with UTC start and end times. Daily
+Git activity and commit streaks also use UTC dates, regardless of the machine's
+timezone or the author's original offset. Consecutive UTC dates remain a streak
+across daylight-saving changes.
+
+The optional Python dashboard (`python dashboard.py`, after installing
+`requirements.txt`) adds Claude Code usage analytics. Its daily token totals
+include the partial first day of the rolling interval, so a seven-day report can
+show eight UTC calendar dates. Future-dated records are excluded. Timestamps
+without an offset are treated as UTC; hourly activity is shown in local time.
+If live usage quotas are unavailable or invalid, the dashboard uses the latest
+valid cached quota entry when one exists.
+
 ## Requirements
 
 - Bash 3.2+ (ships with macOS)
 - Git
 - Works on macOS and Linux (handles both `date` flavors)
+
+## Tests
+
+Run the offline regression suite with Python 3.11+ and Git:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+Tests use temporary repositories and synthetic analytics files, mock all HTTP
+calls, and do not read your local Claude history or credentials. CI also checks
+Python and Bash syntax.

@@ -26,5 +26,8 @@ jobs:
       - name: Python syntax
         run: python -m py_compile claude_analytics.py dashboard.py git_tracker.py
 
+      - name: Offline regression tests
+        run: python -m unittest discover -s tests -v
+
       - name: Bash syntax
         run: bash -n git-weekly-report.sh
