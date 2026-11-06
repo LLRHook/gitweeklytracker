@@ -350,7 +350,7 @@ impl Analytics {
         }
         result.longest_streak = streak(&all_dates);
         // Stable sort preserves first-seen ordering for ties, like the Python API.
-        result.top_files.sort_by(|a, b| b.0.cmp(&a.0));
+        result.top_files.sort_by_key(|row| std::cmp::Reverse(row.0));
         result.top_files.truncate(10);
         result
     }
