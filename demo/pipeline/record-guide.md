@@ -7,11 +7,17 @@ repos, private `.env` values, or live work data.
 ## Automated Capture
 
 ```bash
-cd "/Users/victorivanov/Documents/personal projects/gitweeklytracker"
+cd /path/to/gitweeklytracker
+cargo build --release --locked --offline
 bash demo/pipeline/setup.sh
 bash demo/pipeline/record-clips.sh
 bash demo/pipeline/make-demo.sh
 ```
+
+The capture script copies the Python report helpers and compiled Rust processor
+into its temporary fixture. For a custom Cargo target directory, set
+`GIT_TRACKER_BIN` to the compiled executable before capture. Recording never
+builds or installs the processor implicitly.
 
 Expected output:
 

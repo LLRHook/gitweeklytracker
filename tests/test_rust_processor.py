@@ -172,6 +172,44 @@ class RustProcessorTests(unittest.TestCase):
         self.assertIn("| Total Commits | 1 |", markdown)
         self.assertIn(f"## {EMAIL}", markdown)
 
+    def test_demo_fixture_runs_with_copied_helpers_and_binary_without_capture(self):
+        # A synthetic VHS peer verifies packaging and runs the fixture report.
+        # It never opens a browser, records video, or writes to demo assets.
+        bindir = self.root / "capture peers"
+        bindir.mkdir()
+        peer = bindir / "vhs"
+        peer.write_text(f"#!{sys.executable}\n" +
+            "import os, pathlib, re, subprocess, sys\n"
+            "tape = pathlib.Path(sys.argv[1]).read_text()\n"
+            "directory = re.search(r'^Type \\\"cd \\\'(.*)\\\'\\\"$', tape, re.M).group(1)\n"
+            "root = pathlib.Path(directory)\n"
+            "for name in ['git-weekly-report.sh', 'git_tracker.py', 'git_report.py', 'target/release/gitweeklytracker-core']:\n"
+            "    assert (root / name).is_file(), name\n"
+            "env = {k:v for k,v in os.environ.items() if k != 'GIT_TRACKER_BIN'}\n"
+            "env.update(GIT_REPORT_EMAILS='demo@example.com', GIT_REPORT_REPOS='./demo-repos')\n"
+            "subprocess.run(['bash', 'git-weekly-report.sh'], cwd=root, env=env, check=True, capture_output=True)\n"
+            "report = next(root.glob('weekly-report-*.md')).read_text()\n"
+            "assert '## demo@example.com' in report\n"
+            "assert '| Total Commits | 0 |' not in report\n"
+            "print('Verified synthetic capture fixture')\n")
+        peer.chmod(0o755)
+        # The existing capture script uses BSD date flags. A bounded clock peer
+        # keeps this offline packaging check portable to the Linux CI runner.
+        clock = bindir / "date"
+        clock.write_text(f"#!{sys.executable}\n" +
+            "import sys\nfrom datetime import datetime, timedelta, timezone\n"
+            "now = datetime.now(timezone.utc)\n"
+            "for arg in sys.argv[1:]:\n"
+            "    if arg.startswith('-v-') and arg.endswith('d'):\n"
+            "        now -= timedelta(days=int(arg[3:-1]))\n"
+            "print(now.strftime(sys.argv[-1].lstrip('+')))\n")
+        clock.chmod(0o755)
+        script = Path(git_tracker.__file__).parent / "demo/pipeline/record-clips.sh"
+        result = subprocess.run(["bash", str(script)], cwd=self.root, capture_output=True,
+            text=True, timeout=20, env={**self.env, "PATH": str(bindir) + os.pathsep + self.env["PATH"]})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.count("Verified synthetic capture fixture"), 4)
+
     def test_report_cli_no_repositories_and_invalid_config_do_not_write_reports(self):
         script = Path(git_report.__file__)
         for emails, now in [(EMAIL, NOW.isoformat()), (" , ", NOW.isoformat()), (EMAIL, "invalid")]:
