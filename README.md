@@ -99,13 +99,19 @@ UTC. Merge commits count as commits; their file statistics follow the default
 Git's statistics and NUL-delimited file output. File rankings retain the Python
 API's first-seen ordering for equal counts.
 
-Each Git command has a ten-second timeout. Unreadable, empty, failed or timed-out
+Each Git command has a ten-second timeout covering both process and stdout
+completion, including a detached helper retaining the pipe. Unreadable, empty, failed or timed-out
 repositories contribute no activity for the failed command, and scanning
-continues. Timed-out Git process groups and their helpers are terminated. An
+continues. Only the owned Git process group is terminated; detached peers are not
+targeted. An
 explicit empty repository still counts as scanned. The dashboard returns an
 empty analytics result when discovery finds no repositories; the report command
 exits with an error, matching its existing behavior. Dashboard progress callbacks
 mark the beginning and end of the Rust scan.
+
+The Rust/Python JSON protocol always uses UTF-8, independent of the locale.
+Analytics retain raw filenames; terminal, dashboard and Markdown displays escape
+control characters and line separators into visible text.
 
 The optional Python dashboard (`python dashboard.py`, after installing
 `requirements.txt`) adds Claude Code usage analytics. Its daily token totals

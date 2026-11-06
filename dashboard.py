@@ -16,6 +16,7 @@ from claude_analytics import (
     ClaudeAnalytics, UsageQuota,
 )
 from git_tracker import get_git_analytics, GitAnalytics, load_env_config, DAY_NAMES
+from git_report import display_text
 
 
 console = Console()
@@ -396,7 +397,7 @@ def render_git_top_files(git_data: GitAnalytics) -> Table:
     table.add_column("File", style="white", no_wrap=True)
 
     for count, filepath in git_data.top_files:
-        table.add_row(str(count), filepath)
+        table.add_row(str(count), display_text(filepath))
 
     return table
 

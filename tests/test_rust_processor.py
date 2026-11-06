@@ -251,7 +251,7 @@ class RustProcessorTests(unittest.TestCase):
         self.assertEqual(result.top_files, [(2, f"{self.repo.name}/{new}"),
                                           (1, f"{self.repo.name}/{old}")])
         markdown = git_report.render_markdown(result, [str(self.repo)], NOW)
-        self.assertIn("new \\| `name` é\tline\\n.txt", markdown)
+        self.assertIn("new \\| `name` é\\tline\\n.txt", markdown)
 
     def test_binary_files_count_as_changed_without_line_insertions(self):
         self.commit(content=b"\0binary\xfffixture")
@@ -374,6 +374,46 @@ class RustProcessorTests(unittest.TestCase):
         self.assertEqual(data["total_commits"], 5000)
         self.assertEqual(data["total_insertions"], 5000)
         self.assertEqual(data["top_files"], [[5000, f"{self.repo.name}/same file.txt"]])
+
+    def test_detached_stdout_helper_cannot_extend_git_deadline(self):
+        marker = self.root / "detached-helper-started"
+        helper = f"from pathlib import Path; import time; Path({str(marker)!r}).touch(); time.sleep(2)"
+        env = self.fake_git(
+            "import subprocess, sys, time\nfrom pathlib import Path\n"
+            f"subprocess.Popen([sys.executable, '-c', {helper!r}], start_new_session=True)\n"
+            f"deadline=time.monotonic()+1\nwhile not Path({str(marker)!r}).exists() and time.monotonic()<deadline: time.sleep(0.005)\n")
+        start = time.monotonic()
+        result = self.run_core("--timeout-ms", "500", env=env)
+        self.assertLess(time.monotonic() - start, 1.25)
+        self.assertTrue(marker.exists(), "The detached peer must actually retain stdout")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["total_commits"], 0)
+
+    def test_report_escapes_controls_without_changing_analytics_paths(self):
+        filename = "file-\x1b[2J\x1b[H-\x85-\u2028.txt"
+        self.commit(filename=filename)
+        data = self.report()
+        self.assertEqual(data.top_files[0][1], f"{self.repo.name}/{filename}")
+        for output in (git_report.render_terminal(data, Path("report.md")),
+                       git_report.render_markdown(data, [str(self.repo)], NOW)):
+            for control in ("\x1b", "\x85", "\u2028"):
+                self.assertNotIn(control, output)
+            self.assertIn(r"\x1b", output)
+
+    def test_analytics_utf8_protocol_is_independent_of_ascii_locale(self):
+        self.commit(filename="café.txt")
+        code = (
+            "from datetime import datetime, timezone; import git_tracker; "
+            f"data=git_tracker._collect_report([{EMAIL!r}], [{str(self.repo)!r}], "
+            "now=datetime(2026,10,22,12,tzinfo=timezone.utc))[0]; "
+            "assert data.total_commits == 1; "
+            "assert data.top_files[0][1].endswith('/caf\\u00e9.txt')"
+        )
+        env = {**self.env, "LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0",
+               "PYTHONPATH": str(Path(git_tracker.__file__).parent)}
+        result = subprocess.run([sys.executable, "-c", code], cwd=self.root, env=env,
+                                capture_output=True, encoding="utf-8", timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_invalid_cli_arguments_fail_without_git_access(self):
         marker = self.root / "git-called"

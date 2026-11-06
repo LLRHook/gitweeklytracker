@@ -11,16 +11,24 @@ from pathlib import Path
 from git_tracker import DAY_NAMES, _collect_report
 
 
+def display_text(value: str) -> str:
+    """Keep untrusted labels on one visible line without terminal controls."""
+    return "".join(char.encode("unicode_escape").decode("ascii")
+                   if ord(char) < 32 or 127 <= ord(char) <= 159 or char in "\u2028\u2029"
+                   else char for char in str(value))
+
+
 def markdown_text(value: str) -> str:
     value = html.escape(value).replace("\\", "\\\\")
     for char in "|`*_[]":
         value = value.replace(char, "\\" + char)
-    return value.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+    return display_text(value.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t"))
 
 
 def markdown_code(value: str) -> str:
     # Code-span contents need literal backslashes; table separators still escape.
     value = value.replace("|", "\\|").replace("\n", "\\n").replace("\r", "\\r")
+    value = display_text(value)
     fence = "`" * (max((len(run) for run in re.findall(r"`+", value)), default=0) + 1)
     padding = " " if value.startswith("`") or value.endswith("`") else ""
     return f"{fence}{padding}{value}{padding}{fence}"
@@ -78,14 +86,14 @@ def render_terminal(data, report_file):
              "═══════════════════════════════════════════", ""]
     for index, email in enumerate(data.emails):
         rows = author_rows(data, index)
-        lines.extend([f"Author: {email}", "─────────────────────────────",
+        lines.extend([f"Author: {display_text(email)}", "─────────────────────────────",
                       f"  {'Commits:':18} {sum(r.commits for r in rows)}",
                       f"  {'Insertions:':18} +{sum(r.insertions for r in rows)}",
                       f"  {'Deletions:':18} -{sum(r.deletions for r in rows)}", ""])
         if rows:
             lines.append(f"  {'Repo':25} {'Commits':>8} {'Ins':>10} {'Del':>10}")
             lines.append(f"  {'─' * 25} {'─' * 8} {'─' * 10} {'─' * 10}")
-            lines.extend(f"  {row.repo_name:25} {row.commits:8} {row.insertions:+10d} {('-' + str(row.deletions)):>10}"
+            lines.extend(f"  {display_text(row.repo_name):25} {row.commits:8} {row.insertions:+10d} {('-' + str(row.deletions)):>10}"
                          for row in rows)
             lines.append("")
     lines.extend(["── Summary ──────────────────",
@@ -96,7 +104,7 @@ def render_terminal(data, report_file):
                   f"  {'Longest Streak:':18} {data.longest_streak} day(s)", ""])
     if data.top_files:
         lines.append("── Top Changed Files ────────")
-        lines.extend(f"  {count:4}  {path}" for count, path in data.top_files)
+        lines.extend(f"  {count:4}  {display_text(path)}" for count, path in data.top_files)
         lines.append("")
     lines.append("── Daily Activity ───────────")
     maximum = max(data.daily_activity.values())
@@ -104,7 +112,7 @@ def render_terminal(data, report_file):
         count = data.daily_activity[day]
         bar = "█" * (count * 20 // maximum) if maximum else ""
         lines.append(f"  {day}: {bar:20} {count}")
-    lines.extend(["", f"Report saved to: {report_file}"])
+    lines.extend(["", f"Report saved to: {display_text(report_file)}"])
     return "\n".join(lines)
 
 

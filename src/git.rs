@@ -2,6 +2,7 @@
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -48,11 +49,13 @@ pub fn run(repo: &Path, args: &[String], timeout: Duration) -> Vec<u8> {
     let mut stdout = child.stdout.take().expect("piped stdout");
     // Drain concurrently: a large history must not fill the pipe and deadlock
     // the timeout monitor. There is one reader per Git command, not per commit.
-    let reader = thread::spawn(move || {
-        let mut bytes = Vec::new();
-        stdout.read_to_end(&mut bytes).map(|_| bytes)
-    });
     let start = Instant::now();
+    let (completed, output) = mpsc::sync_channel(1);
+    thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let result = stdout.read_to_end(&mut bytes).map(|_| bytes);
+        let _ = completed.send(result);
+    });
     let success = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status.success(),
@@ -62,6 +65,17 @@ pub fn run(repo: &Path, args: &[String], timeout: Duration) -> Vec<u8> {
     };
     stop_group(&mut child);
     let _ = child.wait();
-    let bytes = reader.join().ok().and_then(Result::ok).unwrap_or_default();
-    if success { bytes } else { Vec::new() }
+    // A detached descendant can retain stdout after the Git leader exits. The
+    // pipe belongs to the same deadline; never join its reader without a bound.
+    // Only the owned process group is terminated. Any late reader result is
+    // discarded when this receiver/CLI exits, without killing unrelated peers.
+    if success && start.elapsed() < timeout {
+        output
+            .recv_timeout(timeout.saturating_sub(start.elapsed()))
+            .ok()
+            .and_then(Result::ok)
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    }
 }

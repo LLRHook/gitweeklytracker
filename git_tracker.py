@@ -62,7 +62,7 @@ def _collect_report(
     if progress_callback:
         progress_callback(0, 0, "Scanning git repos with Rust...")
     try:
-        result = subprocess.run(command, capture_output=True, text=True, check=True)
+        result = subprocess.run(command, capture_output=True, encoding="utf-8", check=True)
     except FileNotFoundError as error:
         raise RuntimeError(
             "Rust Git processor not found. Run cargo build --release --locked in "
