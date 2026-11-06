@@ -43,6 +43,16 @@ class GitReportTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
+        environment = {key: value for key, value in os.environ.items()
+                       if not key.startswith("GIT_") or key == "GIT_TRACKER_BIN"}
+        environment.update({
+            "HOME": self.temp.name,
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
+        })
+        isolated = patch.dict(os.environ, environment, clear=True)
+        isolated.start()
+        self.addCleanup(isolated.stop)
         self.repo = Path(self.temp.name) / "repo"
         self.repo.mkdir()
         self.git("init", "-q")
@@ -116,6 +126,8 @@ class GitReportTests(unittest.TestCase):
         script = root / "report.sh"
         source = Path(git_tracker.__file__).with_name("git-weekly-report.sh")
         script.write_text(source.read_text())
+        for name in ("git_report.py", "git_tracker.py"):
+            shutil.copyfile(source.with_name(name), root / name)
         bin_dir = root / "bin"
         bin_dir.mkdir()
         date_command = bin_dir / "date"

@@ -1,0 +1,12 @@
+[package]
+name = "gitweeklytracker-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+# Keep the Git processor offline and dependency-free. Python owns presentation.
+[dependencies]
+
+[profile.release]
+strip = true
