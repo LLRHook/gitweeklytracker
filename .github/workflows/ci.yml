@@ -13,6 +13,9 @@ jobs:
   smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      RUSTUP_TOOLCHAIN: stable
+      GIT_TRACKER_BIN: ${{ github.workspace }}/target/release/gitweeklytracker-core
 
     steps:
       - name: Checkout
@@ -24,7 +27,25 @@ jobs:
           python-version: "3.11"
 
       - name: Python syntax
-        run: python -m py_compile claude_analytics.py dashboard.py git_tracker.py
+        run: python -m py_compile claude_analytics.py dashboard.py git_tracker.py git_report.py
+
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+
+      - name: Rust formatting
+        run: cargo fmt --all --check
+
+      - name: Rust lint
+        run: cargo clippy --all-targets --locked --offline -- -D warnings
+
+      - name: Rust unit tests
+        run: cargo test --locked --offline
+
+      - name: Build Git processor
+        run: cargo build --release --locked --offline
+
+      - name: Offline regression tests
+        run: python -m unittest discover -s tests -v
 
       - name: Bash syntax
         run: bash -n git-weekly-report.sh

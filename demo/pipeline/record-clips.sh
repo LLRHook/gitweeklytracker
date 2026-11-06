@@ -16,12 +16,21 @@ if ! command -v vhs >/dev/null 2>&1; then
   exit 1
 fi
 
+CORE_BIN="${GIT_TRACKER_BIN:-$ROOT/target/release/gitweeklytracker-core}"
+if [[ ! -x "$CORE_BIN" ]]; then
+  echo "ERROR: Build the Git processor with cargo build --release --locked --offline first, or set GIT_TRACKER_BIN."
+  exit 1
+fi
+
 mkdir -p "$CLIPS_DIR"
 
 DEMO_DIR="$WORK_DIR/git-weekly-demo"
 REPO_DIR="$DEMO_DIR/demo-repos/demo-api"
-mkdir -p "$REPO_DIR"
-cp "$ROOT/git-weekly-report.sh" "$DEMO_DIR/git-weekly-report.sh"
+mkdir -p "$REPO_DIR" "$DEMO_DIR/target/release"
+cp "$ROOT/git-weekly-report.sh" "$ROOT/git_tracker.py" "$ROOT/git_report.py" "$DEMO_DIR/"
+cp "$CORE_BIN" "$DEMO_DIR/target/release/gitweeklytracker-core"
+# Use the isolated copy even when the caller selects a custom build location.
+export GIT_TRACKER_BIN="$DEMO_DIR/target/release/gitweeklytracker-core"
 
 cd "$REPO_DIR"
 git init -q

@@ -2,7 +2,7 @@
 """Developer Analytics Dashboard - Git activity + Claude Code token usage."""
 
 import os
-from datetime import date
+from datetime import datetime, timezone
 
 from rich.console import Console
 from rich.panel import Panel
@@ -16,6 +16,7 @@ from claude_analytics import (
     ClaudeAnalytics, UsageQuota,
 )
 from git_tracker import get_git_analytics, GitAnalytics, load_env_config, DAY_NAMES
+from git_report import display_text
 
 
 console = Console()
@@ -72,12 +73,12 @@ def _gauge(pct: float, width: int = 20) -> str:
 def render_header(claude_data: ClaudeAnalytics, quota: UsageQuota) -> Panel:
     """Render the header panel with date range, billing, and quota gauges."""
     bp = claude_data.billing_period
-    today = date.today()
+    today = datetime.now(timezone.utc).date()
     w = console.width
 
     lines = []
     lines.append("[bold white]Developer Analytics Dashboard[/]")
-    lines.append(f"[dim]Last {REPORT_DAYS} days  |  {today.strftime('%B %d, %Y')}[/]")
+    lines.append(f"[dim]Last {REPORT_DAYS} days  |  {today.strftime('%B %d, %Y')} UTC[/]")
     lines.append("")
 
     # Quota gauges (real data from Anthropic API)
@@ -192,7 +193,7 @@ def render_daily_burn(claude_data: ClaudeAnalytics) -> Table:
     chart_width = max(10, min(30, w - 65))
 
     table = Table(
-        title="[bold]Daily Token Burn (Active Tokens)[/]",
+        title="[bold]Daily Token Burn (Active Tokens, UTC)[/]",
         title_style="bold cyan",
         border_style="blue",
         show_lines=False,
@@ -209,7 +210,7 @@ def render_daily_burn(claude_data: ClaudeAnalytics) -> Table:
         table.add_column("Msgs", justify="right", style="dim")
 
     max_active = max((d.usage.active for d in claude_data.daily_usage), default=0)
-    today = date.today()
+    today = datetime.now(timezone.utc).date()
 
     for d in claude_data.daily_usage:
         dow = DAY_NAMES[d.date.weekday()]
@@ -279,7 +280,7 @@ def render_hourly_distribution(claude_data: ClaudeAnalytics) -> Table:
     bar_width = max(10, min(25, (console.width // 2) - 20))
 
     table = Table(
-        title="[bold]Hourly Activity[/]",
+        title="[bold]Hourly Activity (Local Time)[/]",
         title_style="bold cyan",
         border_style="blue",
         show_lines=False,
@@ -358,7 +359,7 @@ def render_git_table(git_data: GitAnalytics) -> Table:
 def render_git_daily(git_data: GitAnalytics) -> Table:
     """Render git daily activity bar chart."""
     table = Table(
-        title="[bold]Git Daily Activity[/]",
+        title="[bold]Git Daily Activity (UTC)[/]",
         title_style="bold magenta",
         border_style="magenta",
         show_lines=False,
@@ -396,7 +397,7 @@ def render_git_top_files(git_data: GitAnalytics) -> Table:
     table.add_column("File", style="white", no_wrap=True)
 
     for count, filepath in git_data.top_files:
-        table.add_row(str(count), filepath)
+        table.add_row(str(count), display_text(filepath))
 
     return table
 

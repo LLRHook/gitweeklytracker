@@ -8,6 +8,7 @@ import urllib.parse
 import urllib.error
 from dataclasses import dataclass, field
 from datetime import datetime, date, timedelta, timezone
+from http.client import HTTPException
 
 
 # Anthropic pricing per million tokens
@@ -296,9 +297,13 @@ def _resolve_project_dir(
 
 
 def _parse_timestamp(ts: str) -> datetime:
-    """Parse ISO 8601 timestamp from JSONL."""
-    ts = ts.replace("Z", "+00:00")
-    return datetime.fromisoformat(ts)
+    """Parse a timestamp as UTC, treating legacy timestamps without an offset as UTC."""
+    if not isinstance(ts, str):
+        raise ValueError("Timestamp must be a string")
+    parsed = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _compute_billing_period(today: date) -> BillingPeriod:
@@ -333,7 +338,7 @@ def get_claude_analytics(
 
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=days)
-    today = date.today()
+    today = now.date()
 
     history_map = _build_session_to_project(claude_dir)
     sessions_map = _build_session_to_project_from_sessions(claude_dir)
@@ -440,7 +445,7 @@ def get_claude_analytics(
                     except (ValueError, TypeError):
                         continue
 
-                    if ts < cutoff:
+                    if not cutoff <= ts <= now:
                         continue
 
                     token_usage = TokenUsage(
@@ -512,10 +517,10 @@ def get_claude_analytics(
         ))
     per_project.sort(key=lambda p: p.usage.total, reverse=True)
 
-    # Build DailyUsage list (last N days, fill gaps)
+    # A rolling N-day interval also includes a partial first calendar day.
     daily_usage: list[DailyUsage] = []
-    for i in range(days):
-        d = today - timedelta(days=days - 1 - i)
+    for i in range((today - cutoff.date()).days + 1):
+        d = cutoff.date() + timedelta(days=i)
         dd = daily_data.get(d)
         if dd:
             usage = dd["usage"]
@@ -583,7 +588,7 @@ def get_claude_analytics(
 
 def _empty_analytics(today: date, days: int) -> ClaudeAnalytics:
     """Return empty analytics when no data is available."""
-    daily = [DailyUsage(date=today - timedelta(days=days - 1 - i)) for i in range(days)]
+    daily = [DailyUsage(date=today - timedelta(days=days - i)) for i in range(days + 1)]
     return ClaudeAnalytics(
         per_project=[],
         daily_usage=daily,
@@ -618,7 +623,7 @@ class UsageBucket:
         if not self.resets_at:
             return None
         try:
-            return datetime.fromisoformat(self.resets_at.replace("Z", "+00:00"))
+            return _parse_timestamp(self.resets_at)
         except ValueError:
             return None
 
@@ -657,7 +662,8 @@ def _load_oauth_credentials() -> dict | None:
         return None
     try:
         with open(creds_path, encoding="utf-8") as f:
-            return json.load(f)
+            creds = json.load(f)
+        return creds if isinstance(creds, dict) else None
     except (json.JSONDecodeError, OSError):
         return None
 
@@ -677,14 +683,14 @@ def _refresh_token_if_needed(creds: dict) -> dict | None:
     expires_at = creds.get("expiresAt", "")
     if expires_at:
         try:
-            exp = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+            exp = _parse_timestamp(expires_at)
             if datetime.now(timezone.utc) < exp - timedelta(seconds=60):
                 return creds  # still valid
-        except ValueError:
+        except (ValueError, OverflowError):
             pass
 
     refresh_token = creds.get("refreshToken")
-    if not refresh_token:
+    if not isinstance(refresh_token, str) or not refresh_token:
         return creds  # no refresh token, try access token as-is
 
     body = urllib.parse.urlencode({
@@ -699,61 +705,79 @@ def _refresh_token_if_needed(creds: dict) -> dict | None:
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read())
-            creds["accessToken"] = data["access_token"]
+            if not isinstance(data, dict):
+                return creds
+            access_token = data.get("access_token")
+            if not isinstance(access_token, str) or not access_token:
+                return creds
+            # Validate the complete response before saving any rotated tokens.
+            updated = {**creds, "accessToken": access_token}
             if "refresh_token" in data:
-                creds["refreshToken"] = data["refresh_token"]
+                if not isinstance(data["refresh_token"], str) or not data["refresh_token"]:
+                    return creds
+                updated["refreshToken"] = data["refresh_token"]
             if "expires_in" in data:
-                exp = datetime.now(timezone.utc) + timedelta(seconds=data["expires_in"])
-                creds["expiresAt"] = exp.isoformat()
-            _save_oauth_credentials(creds)
-            return creds
-    except (urllib.error.URLError, OSError, KeyError, json.JSONDecodeError):
+                lifetime = data["expires_in"]
+                if (not isinstance(lifetime, (int, float))
+                        or isinstance(lifetime, bool) or lifetime <= 0):
+                    return creds
+                exp = datetime.now(timezone.utc) + timedelta(seconds=lifetime)
+                updated["expiresAt"] = exp.isoformat()
+            _save_oauth_credentials(updated)
+            return updated
+    except (urllib.error.URLError, OSError, HTTPException, ValueError, OverflowError):
         return creds  # refresh failed, try existing token
 
 
-def _parse_usage_bucket(data: dict | None) -> UsageBucket | None:
-    if not data or "utilization" not in data:
+def _parse_usage_bucket(data: dict | None, scale: int = 1) -> UsageBucket | None:
+    """Validate a live percentage or a cached fraction before displaying it."""
+    if not isinstance(data, dict):
         return None
+    utilization = data.get("utilization")
+    if not isinstance(utilization, (int, float)) or isinstance(utilization, bool):
+        return None
+    utilization *= scale
+    if not 0 <= utilization <= 100:
+        return None
+    resets_at = data.get("resets_at", "")
     return UsageBucket(
-        utilization=data.get("utilization", 0.0),
-        resets_at=data.get("resets_at", ""),
+        utilization=float(utilization),
+        resets_at=resets_at if isinstance(resets_at, str) else "",
     )
 
 
 def get_usage_quota() -> UsageQuota:
     """Fetch real usage quota from Anthropic OAuth API.
 
-    Falls back to latest entry in history.json if API call fails.
+    Falls back to the latest valid history.json entry if live data is unavailable.
     """
     creds = _load_oauth_credentials()
-    if not creds:
-        return UsageQuota()
-
-    creds = _refresh_token_if_needed(creds)
-    if not creds:
-        return UsageQuota()
-
-    token = creds.get("accessToken", "")
-    if not token:
-        return UsageQuota()
+    if creds:
+        creds = _refresh_token_if_needed(creds)
+    token = creds.get("accessToken", "") if creds else ""
 
     # Try live API
-    req = urllib.request.Request(USAGE_API_URL)
-    req.add_header("Authorization", f"Bearer {token}")
-    req.add_header("anthropic-beta", USAGE_BETA_HEADER)
+    if isinstance(token, str) and token:
+        req = urllib.request.Request(USAGE_API_URL)
+        req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("anthropic-beta", USAGE_BETA_HEADER)
 
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
-            return UsageQuota(
-                five_hour=_parse_usage_bucket(data.get("five_hour")),
-                seven_day=_parse_usage_bucket(data.get("seven_day")),
-                seven_day_opus=_parse_usage_bucket(data.get("seven_day_opus")),
-                seven_day_sonnet=_parse_usage_bucket(data.get("seven_day_sonnet")),
-                available=True,
-            )
-    except (urllib.error.URLError, OSError, json.JSONDecodeError):
-        pass
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+                if isinstance(data, dict):
+                    quota = UsageQuota(
+                        five_hour=_parse_usage_bucket(data.get("five_hour")),
+                        seven_day=_parse_usage_bucket(data.get("seven_day")),
+                        seven_day_opus=_parse_usage_bucket(data.get("seven_day_opus")),
+                        seven_day_sonnet=_parse_usage_bucket(data.get("seven_day_sonnet")),
+                    )
+                    quota.available = any((quota.five_hour, quota.seven_day,
+                                           quota.seven_day_opus, quota.seven_day_sonnet))
+                    if quota.available:
+                        return quota
+        except (urllib.error.URLError, OSError, HTTPException, ValueError):
+            pass
 
     # Fallback: read latest from history.json
     history_path = os.path.join(USAGE_BAR_CONFIG_DIR, "history.json")
@@ -761,19 +785,13 @@ def get_usage_quota() -> UsageQuota:
         try:
             with open(history_path, encoding="utf-8") as f:
                 history = json.load(f)
-            if history:
-                latest = history[-1]
-                return UsageQuota(
-                    five_hour=UsageBucket(
-                        utilization=latest.get("pct5h", 0) * 100,
-                        resets_at="",
-                    ),
-                    seven_day=UsageBucket(
-                        utilization=latest.get("pct7d", 0) * 100,
-                        resets_at="",
-                    ),
-                    available=True,
-                )
+            for latest in reversed(history if isinstance(history, list) else []):
+                if not isinstance(latest, dict):
+                    continue
+                five_hour = _parse_usage_bucket({"utilization": latest.get("pct5h")}, scale=100)
+                seven_day = _parse_usage_bucket({"utilization": latest.get("pct7d")}, scale=100)
+                if five_hour or seven_day:
+                    return UsageQuota(five_hour=five_hour, seven_day=seven_day, available=True)
         except (json.JSONDecodeError, OSError):
             pass
 
